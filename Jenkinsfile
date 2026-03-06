@@ -1,10 +1,6 @@
 pipeline {
     agent any
 
-    environment {
-        IMAGE = "devops-demo"
-    }
-
     stages {
 
         stage('Clone repo') {
@@ -16,36 +12,39 @@ pipeline {
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Get Version') {
             steps {
                 script {
                     VERSION = sh(
-                        script: "git describe --tags --abbrev=0 || echo latest",
+                        script: "cd app && git describe --tags --abbrev=0",
                         returnStdout: true
                     ).trim()
 
-                    sh """
-                    cd app
-                    docker build -t ${IMAGE}:${VERSION} .
-                    docker tag ${IMAGE}:${VERSION} ${IMAGE}:latest
-                    """
+                    env.VERSION = VERSION
                 }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                cd app
+                docker build -t devops-demo:${VERSION} .
+                docker tag devops-demo:${VERSION} devops-demo:latest
+                '''
             }
         }
 
         stage('Deploy to App Server') {
             steps {
-                script {
+                sh '''
+                docker save devops-demo:${VERSION} | ssh sc@192.168.64.16 docker load
 
-                    sh """
-                    docker save ${IMAGE}:latest | ssh sc@192.168.64.16 docker load
+                ssh sc@192.168.64.16 "docker stop devops-demo || true"
+                ssh sc@192.168.64.16 "docker rm devops-demo || true"
 
-                    ssh sc@192.168.64.16 'docker stop devops-demo || true'
-                    ssh sc@192.168.64.16 'docker rm devops-demo || true'
-
-                    ssh sc@192.168.64.16 'docker run -d -p 5000:5000 --name devops-demo ${IMAGE}:latest'
-                    """
-                }
+                ssh sc@192.168.64.16 "docker run -d -p 5000:5000 --name devops-demo devops-demo:${VERSION}"
+                '''
             }
         }
 
